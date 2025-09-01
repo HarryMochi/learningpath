@@ -13,10 +13,9 @@ export async function generateCourseAction(input: GenerateFullCourseInput): Prom
         return result;
     } catch (error) {
         console.error("Error in generateCourseAction:", error);
-        if (error instanceof Error) {
-            throw new Error(error.message);
-        }
-        throw new Error("An unknown error occurred while generating the course.");
+        // The AI can fail for various reasons, including safety filters or unsupported topics.
+        // Instead of propagating a generic error, we'll give a more specific, user-friendly message.
+        throw new Error("The AI was unable to generate a course for this topic. This can happen with very specific or sensitive subjects. Please try a broader or different topic.");
     }
 }
 
