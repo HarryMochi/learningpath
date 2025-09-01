@@ -1,8 +1,8 @@
-
 "use client";
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import type { Course, Step } from '@/lib/types';
 import { getCoursesForUser, addCourse, updateCourse, deleteCourse as deleteCourseFromDb } from '@/lib/firestore';
 import { generateCourseAction, askQuestionAction } from '../actions';
@@ -19,28 +19,45 @@ export type GenerationState = {
     status: 'idle' | 'generating' | 'done';
 };
 
-export default function LearnPage() {
+function LearnPageComponent() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [activeCourseId, setActiveCourseId] = useState<string | null>(null);
   const [generationState, setGenerationState] = useState<GenerationState>({ status: 'idle' });
-  const [isClient, setIsClient] = useState(false);
+  const [mounted, setMounted] = useState(false);
   const { toast } = useToast();
   const { user, loading, logout } = useAuth();
   const router = useRouter();
 
+  // Ensure component is mounted before doing anything client-side
   useEffect(() => {
-    setIsClient(true);
-    if (!loading && !user) {
-      router.push('/login');
+    setMounted(true);
+  }, []);
+
+  // Handle authentication redirect only after mounting
+  useEffect(() => {
+    if (mounted && !loading && !user) {
+      const timer = setTimeout(() => {
+        router.push('/login');
+      }, 100);
+      return () => clearTimeout(timer);
     }
-  }, [user, loading, router]);
+  }, [user, loading, router, mounted]);
   
   const fetchCourses = useCallback(async () => {
-    if (user) {
-      const userCourses = await getCoursesForUser(user.uid);
-      setCourses(userCourses);
+    if (user && mounted) {
+      try {
+        const userCourses = await getCoursesForUser(user.uid);
+        setCourses(userCourses);
+      } catch (error) {
+        console.error('Error fetching courses:', error);
+        toast({
+          variant: "destructive",
+          title: "Error",
+          description: "Failed to load courses. Please refresh the page."
+        });
+      }
     }
-  }, [user]);
+  }, [user, mounted, toast]);
 
   useEffect(() => {
     fetchCourses();
@@ -51,7 +68,7 @@ export default function LearnPage() {
   }, [courses, activeCourseId]);
 
   const handleGenerateCourse = async (topic: string, depth: 15 | 30) => {
-    if (!user) {
+    if (!user || !mounted) {
         toast({ variant: "destructive", title: "Authentication Error", description: "You must be logged in to create a course." });
         return;
     }
@@ -113,6 +130,8 @@ export default function LearnPage() {
   };
 
   const handleUpdateStep = async (courseId: string, stepNumber: number, newStepData: Partial<Step>) => {
+    if (!mounted) return;
+    
     const courseToUpdate = courses.find(c => c.id === courseId);
     if (!courseToUpdate) return;
     
@@ -134,6 +153,10 @@ export default function LearnPage() {
   };
   
   const handleAskQuestion = async (course: Course, step: Step, question: string): Promise<AskStepQuestionOutput> => {
+    if (!mounted) {
+      return { answer: "Please wait for the page to fully load." };
+    }
+    
     try {
         return await askQuestionAction({
             topic: course.topic,
@@ -157,6 +180,8 @@ export default function LearnPage() {
   };
 
   const handleDeleteCourse = async (courseId: string) => {
+    if (!mounted) return;
+    
     const originalCourses = courses;
     setCourses(prev => prev.filter(c => c.id !== courseId));
     if (activeCourseId === courseId) {
@@ -172,7 +197,8 @@ export default function LearnPage() {
     }
   };
 
-  if (loading || !isClient) {
+  // Show loading until everything is properly mounted and authenticated
+  if (!mounted || loading) {
     return (
       <MainLayout>
         <div className="flex items-center justify-center h-screen">
@@ -182,7 +208,16 @@ export default function LearnPage() {
     );
   }
   
-  if (!user) return null;
+  // Show loading if user is not authenticated (will redirect)
+  if (!user) {
+    return (
+      <MainLayout>
+        <div className="flex items-center justify-center h-screen">
+          <Loader2 className="h-8 w-8 animate-spin" />
+        </div>
+      </MainLayout>
+    );
+  }
 
   return (
     <MainLayout>
@@ -219,3 +254,17 @@ export default function LearnPage() {
     </MainLayout>
   );
 }
+
+// Export the component wrapped with dynamic import to disable SSR
+const LearnPage = dynamic(() => Promise.resolve(LearnPageComponent), {
+  ssr: false,
+  loading: () => (
+    <MainLayout>
+      <div className="flex items-center justify-center h-screen">
+        <Loader2 className="h-8 w-8 animate-spin" />
+      </div>
+    </MainLayout>
+  )
+});
+
+export default LearnPage;
